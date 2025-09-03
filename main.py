@@ -7,9 +7,7 @@ import utils
 from agent import rag_ai
 from langchain_core.messages import HumanMessage
 from db.feedback import FeedbackRequest
-from generate_pdf import generatePdf
 app = FastAPI()
-# generatePdf() // TODO: delete this file not needed in  the project
 class UploadRequest(BaseModel):
     user_id: str
 
