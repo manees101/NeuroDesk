@@ -231,7 +231,7 @@ def search_in_collection(query: str, collection_name: str, user_id: str, n_resul
     return results
 
 @tool()
-def search_across_user_collections(query: str, user_id: str, n_results: int = 5, state_context: dict = None) -> tuple[list, int]:
+def search_across_user_collections(query: str, user_id: str, n_results: int = 5, state_context: dict = None):
     """
     Search all documents uploaded by a user for relevant information.
 
@@ -252,8 +252,8 @@ def search_across_user_collections(query: str, user_id: str, n_results: int = 5,
     
     logger.info(f"Searching across all collections for user: {user_id}")
     
-    # import chromadb
-    # client = chromadb.PersistentClient()  ---> for local dev
+    import chromadb
+    client = chromadb.PersistentClient()
     collections = client.list_collections()
     
     user_collections = [col for col in collections if col.name.startswith(f"user_{user_id}_")]
@@ -261,7 +261,7 @@ def search_across_user_collections(query: str, user_id: str, n_results: int = 5,
     
     if not user_collections:
         logger.warning(f"No collections found for user: {user_id}")
-        return ([],0)
+        return []
     
     all_results = []
     for collection in user_collections:

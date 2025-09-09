@@ -1,52 +1,12 @@
-from pydantic import BaseModel, Field, EmailStr
-from typing import Optional
+from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import List, Optional
+
 class User(BaseModel):
     id: str
     name: str
-    email: EmailStr
-    hashed_password: str
-    is_active: bool = True
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
-
-class UserCreate(BaseModel):
-    name: str
-    email: EmailStr
+    email: str
     password: str
-
-class UserPublic(BaseModel):
-    id: str
-    name: str
-    email: EmailStr
-    created_at: datetime
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-class PasswordResetRequest(BaseModel):
-    email: EmailStr
-
-class PasswordResetConfirm(BaseModel):
-    token: str
-    new_password: str
-
-class PasswordResetToken(BaseModel):
-    user_id: str
-    email: EmailStr
-    token: str
-    expires_at: datetime
-    used: bool = False
-    created_at: datetime = Field(default_factory=datetime.now)
-
-class EmailLog(BaseModel):
-    email: EmailStr
-    subject: str
-    content: str
-    type: str  # e.g., "password_reset"
-    status: str = "pending"  # pending | sent | cancelled | failed
-    error: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
