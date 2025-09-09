@@ -1,15 +1,99 @@
 import tempfile
 from typing import Union
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body
+from fastapi import FastAPI, File, UploadFile, HTTPException, Body, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import utils
 from agent import rag_ai
 from langchain_core.messages import HumanMessage
 from db.feedback import FeedbackRequest
+from db.mongo import db
+from db.users import (
+    UserCreate,
+    UserPublic,
+    UserLogin,
+    PasswordResetRequest,
+    PasswordResetConfirm,
+    PasswordResetToken,
+)
+from auth import get_current_user, hash_password, verify_password, create_access_token
+from datetime import datetime, timedelta
+import secrets
+from emailer import send_email
+
 app = FastAPI()
+
 class UploadRequest(BaseModel):
     user_id: str
+
+@app.post("/auth/signup", response_model=UserPublic)
+def signup(payload: UserCreate):
+    existing = db["users"].find_one({"email": payload.email})
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+    user_id = secrets.token_hex(16)
+    user_doc = {
+        "id": user_id,
+        "name": payload.name,
+        "email": payload.email,
+        "hashed_password": hash_password(payload.password),
+        "is_active": True,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+    db["users"].insert_one(user_doc)
+    return UserPublic(id=user_id, name=payload.name, email=payload.email, created_at=user_doc["created_at"])
+
+@app.post("/auth/login")
+def login(payload: UserLogin):
+    user = db["users"].find_one({"email": payload.email})
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not verify_password(payload.password, user.get("hashed_password", "")):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_access_token(sub=user["id"], email=user["email"])
+    return {"access_token": token, "token_type": "bearer"}
+
+@app.get("/auth/me", response_model=UserPublic)
+def me(current_user=Depends(get_current_user)):
+    user = db["users"].find_one({"id": current_user.id})
+    return UserPublic(id=user["id"], name=user["name"], email=user["email"], created_at=user["created_at"])
+
+@app.post("/auth/password-reset/request")
+def request_password_reset(payload: PasswordResetRequest):
+    user = db["users"].find_one({"email": payload.email})
+    # Always respond success to avoid user enumeration, but only create token if user exists
+    if user:
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now() + timedelta(hours=1)
+        reset = PasswordResetToken(
+            user_id=user["id"],
+            email=user["email"],
+            token=token,
+            expires_at=expires_at,
+        )
+        db["password_reset_tokens"].insert_one(reset.model_dump())
+        # Compose email content
+        subject = "Password Reset"
+        content = f"Use this token to reset your password: {token}\nThis token expires at {expires_at.isoformat()}"
+        send_email(email=payload.email, subject=subject, content=content, type="password_reset")
+    return {"message": "If the email exists, a reset link has been sent"}
+
+@app.post("/auth/password-reset/confirm")
+def confirm_password_reset(payload: PasswordResetConfirm):
+    reset = db["password_reset_tokens"].find_one({"token": payload.token})
+    if not reset:
+        raise HTTPException(status_code=400, detail="Invalid token")
+    if reset.get("used"):
+        raise HTTPException(status_code=400, detail="Token already used")
+    if reset["expires_at"] < datetime.now():
+        raise HTTPException(status_code=400, detail="Token expired")
+    # Update user password
+    hashed = hash_password(payload.new_password)
+    db["users"].update_one({"id": reset["user_id"]}, {"$set": {"hashed_password": hashed, "updated_at": datetime.now()}})
+    # Mark token used
+    db["password_reset_tokens"].update_one({"token": payload.token}, {"$set": {"used": True}})
+    return {"message": "Password has been reset"}
 
 @app.get("/")
 def read_root():
@@ -24,16 +108,10 @@ def read_item(item_id: int, q: Union[str, None] = None):
 @app.post("/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    user_id: str = Form(...)
+    current_user = Depends(get_current_user),
 ):
-    """
-    Upload a PDF document, extract text, create embeddings, and store in ChromaDB.
-    Requires user_id in the form data.
-    """
+    user_id = current_user.id
     utils.logger.info(f"Document upload request received for user: {user_id}, filename: {file.filename}")
-    
-    # Validate user_id
-    utils.validate_user_id(user_id)
     
     # Validate PDF file
     utils.validate_pdf_file(file.filename, file.size)
@@ -82,21 +160,15 @@ async def upload_document(
 
 @app.get("/documents/search")
 async def search_documents(
-    query: str, 
-    user_id: str, 
+    query: str,
     collection_name: str = None,
-    n_results: int = 5
+    n_results: int = 5,
+    current_user = Depends(get_current_user),
 ):
-    """
-    Search documents using semantic similarity for a specific user.
-    If collection_name is not provided, searches across all user's collections.
-    """
+    user_id = current_user.id
     utils.logger.info(f"Search request received - Query: '{query}', User: {user_id}, Collection: {collection_name}, Results: {n_results}")
     
     try:
-        # Validate user_id
-        utils.validate_user_id(user_id)
-        
         if collection_name:
             # Search in specific collection
             results = utils.search_in_collection(query, collection_name, user_id, n_results)
@@ -140,16 +212,11 @@ async def search_documents(
         raise HTTPException(status_code=500, detail=f"Error searching documents: {str(e)}")
 
 @app.get("/documents/collections")
-async def list_collections(user_id: str):
-    """
-    List all available document collections for a specific user.
-    """
+async def list_collections(current_user = Depends(get_current_user)):
+    user_id = current_user.id
     utils.logger.info(f"List collections request received for user: {user_id}")
     
     try:
-        # Validate user_id
-        utils.validate_user_id(user_id)
-        
         # Get user collections
         collection_info = utils.get_user_collections(user_id)
         
@@ -169,16 +236,11 @@ async def list_collections(user_id: str):
         raise HTTPException(status_code=500, detail=f"Error listing collections: {str(e)}")
 
 @app.delete("/documents/collections/{collection_name}")
-async def delete_collection(collection_name: str, user_id: str):
-    """
-    Delete a specific collection for a user.
-    """
+async def delete_collection(collection_name: str, current_user = Depends(get_current_user)):
+    user_id = current_user.id
     utils.logger.info(f"Delete collection request received - Collection: {collection_name}, User: {user_id}")
     
     try:
-        # Validate user_id
-        utils.validate_user_id(user_id)
-        
         # Delete the collection
         utils.delete_user_collection(collection_name, user_id)
         
@@ -198,27 +260,19 @@ async def delete_collection(collection_name: str, user_id: str):
         raise HTTPException(status_code=500, detail=f"Error deleting collection: {str(e)}")
 
 @app.get("/ai/ask")
-def ask_ai(query: str, user_id: str):
-    """
-    Ask the AI a question.
-    """
+def ask_ai(query: str, current_user = Depends(get_current_user)):
     try:
-        response = rag_ai.invoke({'messages':[HumanMessage(content=str(query))],'user_id':user_id}) 
+        response = rag_ai.invoke({'messages':[HumanMessage(content=str(query))],'user_id':current_user.id}) 
         return JSONResponse(content=response['messages'][-1].content)
     except Exception as e:
         utils.logger.error(f"Error during asking AI: {e}")
         return HTTPException(status_code=500, detail=f"Error during asking AI: {e}")
-# Log application startup
-utils.logger.info("NeuroDesk Backend application started successfully")
 
 @app.post('/ai/ask/feedback')
-def feedback(payload: FeedbackRequest = Body(...)):
-    """
-    Feedback on the AI's response.
-    """
+def feedback(payload: FeedbackRequest = Body(...), current_user = Depends(get_current_user)):
     try:
+        user_id = current_user.id
         query = payload.query if payload.query else None
-        user_id = payload.user_id
         is_positive_feedback = payload.is_positive_feedback if  payload.is_positive_feedback else None
         comments = payload.comments if payload.comments else None
 
@@ -239,9 +293,11 @@ def feedback(payload: FeedbackRequest = Body(...)):
         feedback_document = utils.prepare_feedback_document(feedback)
         utils.logger.info(f"prepared document: {feedback_document}")
         utils.save_feedback_document(feedback_document)
-        # utils.logger.info(f"Feedback saved for user: {payload.user_id}, query: {payload.query if payload.query else None}, is_positive_feed: {payload.is_positive_feed}, comments: {comments}")
+        # utils.logger.info(f"Feedback saved for user: {user_id}, query: {payload.query if payload.query else None}, is_positive_feed: {payload.is_positive_feedback}, comments: {comments}")
         return JSONResponse(content={"message": "Feedback saved successfully"})
     except Exception as e:
         utils.logger.error(f"Error during feedback: {e}")
         return JSONResponse(status_code=500, content=f"Error during feedback: {e}")
 
+# Log application startup
+utils.logger.info("NeuroDesk Backend application started successfully")
