@@ -20,8 +20,23 @@ from auth import get_current_user, hash_password, verify_password, create_access
 from datetime import datetime, timedelta
 import secrets
 from emailer import send_email
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+origins = [
+    "http://localhost.tiangolo.com",
+    "https://localhost.tiangolo.com",
+    "http://localhost",
+    "http://localhost:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class UploadRequest(BaseModel):
     user_id: str
@@ -52,7 +67,13 @@ def login(payload: UserLogin):
     if not verify_password(payload.password, user.get("hashed_password", "")):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_access_token(sub=user["id"], email=user["email"])
-    return {"access_token": token, "token_type": "bearer"}
+    user_public = UserPublic(
+        id=user["id"],
+        name=user["name"],
+        email=user["email"],
+        created_at=user["created_at"],
+    )
+    return {"access_token": token, "token_type": "bearer", "user": user_public.model_dump()}
 
 @app.get("/auth/me", response_model=UserPublic)
 def me(current_user=Depends(get_current_user)):
