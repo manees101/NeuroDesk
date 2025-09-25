@@ -4,18 +4,42 @@ A FastAPI backend for processing PDF documents with LangChain and OpenAI embeddi
 
 ## Setup
 
-1. **Install dependencies:**
+1. **Python version:**
+   - This project targets Python 3.11.8. Please ensure you have Python 3.11.8 installed.
+   - You can verify with:
+     ```bash
+     python --version
+     ```
+
+2. **Create and activate a virtual environment:**
+   - Windows (PowerShell):
+     ```powershell
+     python -m venv venv
+     .\venv\Scripts\Activate.ps1
+     ```
+   - Windows (Command Prompt):
+     ```bat
+     python -m venv venv
+     .\venv\Scripts\activate.bat
+     ```
+   - macOS/Linux (bash/zsh):
+     ```bash
+     python3 -m venv venv
+     source venv/bin/activate
+     ```
+
+3. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Environment Configuration:**
+4. **Environment Configuration:**
    Create a `.env` file in the root directory with your OpenAI API key:
    ```
    OPENAI_API_KEY=your_openai_api_key_here
    ```
 
-3. **Run the application:**
+5. **Run the application:**
    ```bash
    uvicorn main:app --reload
    ```
