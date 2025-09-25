@@ -3,5 +3,6 @@ chroma_db
 chroma
 .env
 .venv
+venv
 app.log
 .vscode
