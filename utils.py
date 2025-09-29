@@ -1,6 +1,5 @@
 import os
 import logging
-from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -17,7 +16,6 @@ from langchain_core.documents import Document
 from chromadb import CloudClient
 from pymongo import DESCENDING
 from langchain_openai import ChatOpenAI
-load_dotenv()
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -29,7 +27,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
-# Load environment variables
 
 # Initialize OpenAI embeddings
 logger.info("Initializing OpenAI embeddings...")

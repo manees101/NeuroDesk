@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import tempfile
 from typing import Union
 from fastapi import FastAPI, File, UploadFile, HTTPException, Body, Depends
@@ -7,7 +9,6 @@ import utils
 from agent import rag_ai
 from langchain_core.messages import HumanMessage
 from db.feedback import FeedbackRequest
-from db.mongo import db
 from db.users import (
     UserCreate,
     UserPublic,
@@ -21,6 +22,7 @@ from datetime import datetime, timedelta
 import secrets
 from emailer import send_email
 from fastapi.middleware.cors import CORSMiddleware
+from db.mongo import db
 
 app = FastAPI()
 origins = [
