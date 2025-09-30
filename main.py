@@ -30,6 +30,7 @@ origins = [
     "https://localhost.tiangolo.com",
     "http://localhost",
     "http://localhost:3000",
+    "http://localhost:3001",
 ]
 
 app.add_middleware(
@@ -235,17 +236,24 @@ async def search_documents(
         raise HTTPException(status_code=500, detail=f"Error searching documents: {str(e)}")
 
 @app.get("/documents/collections")
-async def list_collections(current_user = Depends(get_current_user)):
+async def list_collections(page: int = 1, limit: int = 20, current_user = Depends(get_current_user)):
     user_id = current_user.id
     utils.logger.info(f"List collections request received for user: {user_id}")
     
     try:
         # Get user collections
-        collection_info = utils.get_user_collections(user_id)
+        all_collections = utils.get_user_collections(user_id)
+        total = len(all_collections)
+        start = max((page - 1) * limit, 0)
+        end = start + limit
+        collection_info = all_collections[start:end]
         
         response_data = {
             "user_id": user_id,
-            "collections": collection_info
+            "collections": collection_info,
+            "page": page,
+            "limit": limit,
+            "total": total,
         }
         
         utils.logger.info(f"List collections completed successfully: {len(collection_info)} collections returned")
@@ -283,13 +291,58 @@ async def delete_collection(collection_name: str, current_user = Depends(get_cur
         raise HTTPException(status_code=500, detail=f"Error deleting collection: {str(e)}")
 
 @app.get("/ai/ask")
-def ask_ai(query: str, current_user = Depends(get_current_user)):
+def ask_ai(query: str, collection_name: str | None, current_user = Depends(get_current_user)):
     try:
-        response = rag_ai.invoke({'messages':[HumanMessage(content=str(query))],'user_id':current_user.id}) 
+        response = rag_ai.invoke({'messages':[HumanMessage(content=str(query))],'user_id':current_user.id, "collection_name":collection_name}) 
         return JSONResponse(content=response['messages'][-1].content)
     except Exception as e:
         utils.logger.error(f"Error during asking AI: {e}")
         return HTTPException(status_code=500, detail=f"Error during asking AI: {e}")
+
+@app.get("/documents/{collection_name}/messages")
+def get_chat_history(
+    collection_name: str,
+    limit: int = 20,
+    current_user = Depends(get_current_user),
+    cursor: str | None = None,
+):
+    try:
+        utils.logger.info("callling jinglk")
+        user_id = current_user.id
+        # Ensure access
+        if not collection_name.startswith(f"user_{user_id}_"):
+            raise HTTPException(status_code=403, detail="Access denied to this collection")
+        query_filter = {"user_id": user_id, "collection_name": collection_name}
+        if cursor:
+            # cursor is ISO timestamp; fetch older than cursor
+            query_filter["created_at"] = {"$lt": datetime.fromisoformat(cursor)}
+        items = list(
+            db["user_chat"]
+            .find(query_filter)
+            .sort("created_at", -1)
+            .limit(limit)
+        )
+        # next_cursor is the oldest item's created_at if there might be more
+        next_cursor = items[-1]["created_at"].isoformat() if len(items) == limit else None
+        # map to message shape
+        messages = []
+        for it in reversed(items):
+            messages.append({
+                "id": str(it.get("_id")),
+                "role": "user",
+                "content": it.get("query"),
+                "created_at": it.get("created_at").isoformat(),
+            })
+            messages.append({
+                "id": str(it.get("_id")) + "-ai",
+                "role": "assistant",
+                "content": it.get("llm_response"),
+                "created_at": it.get("created_at").isoformat(),
+            })
+        return {"messages": messages, "next_cursor": next_cursor, "limit": limit}
+    except Exception as e:
+        utils.logger.error(f"Error fetching chat history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch chat history")
 
 @app.post('/ai/ask/feedback')
 def feedback(payload: FeedbackRequest = Body(...), current_user = Depends(get_current_user)):

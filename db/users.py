@@ -55,6 +55,7 @@ class UserChat(BaseModel):
     query: str
     retrieved_documents: Optional[str]
     llm_response: str
+    collection_name: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

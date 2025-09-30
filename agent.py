@@ -24,6 +24,7 @@ tool_dict = {tool.name: tool for tool in tools}
 class RagAgent(TypedDict):
     user_id: str
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    collection_name: str | None
 
 
 def build_system_prompt(
@@ -69,7 +70,8 @@ You are helpful, trustworthy, and always focused on providing the best possible 
 def init_agent(state: RagAgent) -> RagAgent:
     """Initialize rag agent with user chat history if exists"""
     user_id = state["user_id"]
-    chat_history = load_chat_history(user_id)
+    collection_name = state["collection_name"] or None
+    chat_history = load_chat_history(user_id, collection_name=collection_name)
     logger.info(f"Loaded chat history for user {user_id}: {len(chat_history)} messages")
     state["messages"] = chat_history + list(state["messages"])
     return state
@@ -80,14 +82,11 @@ def rag_agent(state: RagAgent) -> RagAgent:
     messages = list(state["messages"])
     last_message = state["messages"][-1]
     past_feedbacks = get_similar_feedback_documents(last_message.content)
-    extra_instructions=""
+    extra_instructions = ""
     if past_feedbacks:
         logger.info(f"feedbacks: {len(past_feedbacks)}")
         extra_instructions = "\n Consider these past user feedbacks and generate better response. \n".join(
-            [
-                f"Feedback: {feedback.page_content}"
-                for feedback in past_feedbacks
-            ]
+            [f"Feedback: {feedback.page_content}" for feedback in past_feedbacks]
         )
     system_prompt = build_system_prompt(
         state["user_id"], tool_dict.keys(), extra_instructions
@@ -131,7 +130,7 @@ def should_continue(state: RagAgent) -> RagAgent:
         hasattr(last_message, "tool_calls") and len(last_message.tool_calls) > 0
     )
     if not can_continue:
-        save_chat_history(state["user_id"], state["messages"])
+        save_chat_history(state["user_id"], state["messages"], state["collection_name"])
     return can_continue
 
 
