@@ -307,7 +307,6 @@ def get_chat_history(
     cursor: str | None = None,
 ):
     try:
-        utils.logger.info("callling jinglk")
         user_id = current_user.id
         # Ensure access
         if not collection_name.startswith(f"user_{user_id}_"):

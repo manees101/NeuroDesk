@@ -9,7 +9,7 @@ from db.mongo import db
 
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRES_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRES_MINUTES", "15"))
+ACCESS_TOKEN_EXPIRES_DAYS = int(os.getenv("ACCESS_TOKEN_EXPIRES_HOURS", "1"))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -28,7 +28,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(*, sub: str, email: str) -> str:
     now = datetime.now(timezone.utc)
-    exp = now + timedelta(minutes=ACCESS_TOKEN_EXPIRES_MINUTES)
+    exp = now + timedelta(days=ACCESS_TOKEN_EXPIRES_DAYS)
     payload = {
         "sub": sub,
         "email": email,
