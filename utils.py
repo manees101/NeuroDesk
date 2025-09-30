@@ -16,7 +16,8 @@ from langchain_core.documents import Document
 from chromadb import CloudClient
 from pymongo import DESCENDING
 from langchain_openai import ChatOpenAI
-
+from langchain_google_genai import ChatGoogleGenerativeAI
+from bson import ObjectId
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +25,28 @@ logging.basicConfig(
     handlers=[logging.FileHandler("app.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
-llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
+
+def get_llm() -> (ChatOpenAI | ChatGoogleGenerativeAI | None):
+    """
+    Returns LLM based on env keys. If no key found returns None
+    """
+    if os.environ["OPENAI_API_KEY"]:
+        return ChatOpenAI(model="gpt-4o", temperature=0.3)
+    elif os.environ["GOOGLE_API_KEY"]:
+        return ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                temperature=0.3,
+                max_tokens=None,
+                timeout=None,
+                max_retries=2,
+                )
+    else:
+        return None
+
+def check_if_llm_keys_exists() -> bool:
+    return os.environ["OPENAI_API_KEY"] or os.environ["GOOGLE_API_KEY"]
+
+llm = get_llm()
 
 # Initialize OpenAI embeddings
 logger.info("Initializing OpenAI embeddings...")
@@ -469,6 +491,7 @@ def save_chat_history(
                     retrieved_documents=tool_msg.content if tool_msg else None,
                     llm_response=ai_msg.content,
                     collection_name=collection_name,
+                    is_feedback_submitted=False,
                     created_at=datetime.now(),
                     updated_at=datetime.now(),
                 )
@@ -527,9 +550,18 @@ def load_chat_history(user_id: str, collection_name: str | None, save_to_text_fi
 logger.info("Utils module initialized successfully")
 
 
-def get_latest_or_previous_chat(user_id: str, query: Optional[str] = None):
+def get_latest_or_previous_chat(user_id: str, query: Optional[str] = None, chat_id: Optional[str] = None):
     """utility function which returns the latest chat if only user_id is provided, otherwise returns the previous chat if query is provided"""
-    if user_id and query:
+    if user_id and chat_id:
+        chats = (
+            db["user_chat"]
+            .find({"user_id": user_id, "_id": ObjectId(chat_id)})
+            .sort("created_at", DESCENDING)
+            .limit(1)
+        )
+        chats = list(chats)
+        return chats[0] if chats else None
+    elif user_id and query:
         chats = (
             db["user_chat"]
             .find({"user_id": user_id, "query": query})

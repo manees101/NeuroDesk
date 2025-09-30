@@ -11,12 +11,13 @@ from utils import (
     load_chat_history,
     logger,
     get_similar_feedback_documents,
+    get_llm
 )
 
 load_dotenv()
 tools = [search_across_user_collections, search_in_collection]
-llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
-llm = llm.bind_tools(tools)
+llm = get_llm()
+llm = llm.bind_tools(tools) if llm else None
 
 tool_dict = {tool.name: tool for tool in tools}
 
@@ -28,35 +29,55 @@ class RagAgent(TypedDict):
 
 
 def build_system_prompt(
-    user_id: str, available_tools: list[str] = None, extra_instructions: str = ""
+    user_id: str,
+    collection_name: str | None = None,
+    available_tools: list[str] | None = None,
+    extra_instructions: str = ""
 ) -> str:
     """
     Build a system prompt with user-specific context and tool descriptions.
     """
+
+    default_tools = ["search_across_user_collections", "search_in_collection"]
     tools_description = "\n".join(
         f"- {tool}: for searching documents as described in its docstring or functionality."
-        for tool in (
-            available_tools
-            or ["search_across_user_collections", "search_in_collection"]
-        )
+        for tool in (available_tools or default_tools)
     )
 
+    # 📌 Conditional instruction depending on whether collection_name is provided
+    if collection_name:
+        search_scope_instruction = f"""
+- You must **ONLY** search within the document (collection) named `{collection_name}`.
+- Do **NOT** use cross-document or cross-collection search.
+- Ignore any references to other documents or collections, even if the query mentions them.
+- If the user asks about a different document, politely explain that you are currently restricted to `{collection_name}` and cannot access other documents right now.
+"""
+    else:
+        search_scope_instruction = """
+- You must use **cross-collection search** to retrieve information from any of the user’s available document collections.
+- Choose the most relevant documents to answer the query, and cite each source clearly.
+"""
+
     return f"""
-You are NeuroDesk, an intelligent AI assistant that helps users (currently user ID: {user_id}) find and understand information from their personal PDF document collections.
+You are **NeuroDesk**, an intelligent AI assistant that helps users (user_id: `{user_id}`) find and understand information from their personal PDF document collections.
 
 Your core responsibilities:
 - Answer user questions by searching their uploaded documents for the most relevant information.
-- Use the specialized tools provided in the `utils` module to perform all document retrieval and search operations. These tools include:
+- Use the specialized tools provided in the `utils` module to perform document retrieval and search operations. These tools include:
 {tools_description}
-- Always select the most appropriate tool for the user’s query. Use cross-collection search for general questions, and specific collection search when the user references a particular document.
+
+Search Scope Rules:
+{search_scope_instruction}
+
+Behavioral Guidelines:
 - Always cite the document or collection name, and if possible, the section or page where the information was found.
-- Summarize or quote the most relevant passages, rather than copying large blocks of text.
-- Respect user privacy: only access and search documents belonging to the authenticated user (user_id: {user_id}).
+- Summarize or quote the most relevant passages rather than copying large blocks of text.
+- Respect user privacy: only access and search documents belonging to the authenticated user (user_id: `{user_id}`).
 - If a question cannot be answered from the available documents, politely inform the user and suggest uploading more relevant material if needed.
 - If the user’s query is ambiguous or could refer to multiple documents, ask clarifying questions to narrow down the search.
 - Provide clear, concise, and helpful answers, and avoid speculation beyond the content of the user’s documents.
 
-Formatting guidelines:
+Formatting Guidelines:
 - When citing, use the document or collection name and, if available, the section or page.
 - If you use multiple sources, clearly indicate which information comes from which document.
 - If you cannot find an answer, say so transparently and offer next steps.
@@ -65,7 +86,6 @@ Formatting guidelines:
 
 You are helpful, trustworthy, and always focused on providing the best possible information from the user’s own knowledge base.
 """.strip()
-
 
 def init_agent(state: RagAgent) -> RagAgent:
     """Initialize rag agent with user chat history if exists"""
@@ -89,7 +109,7 @@ def rag_agent(state: RagAgent) -> RagAgent:
             [f"Feedback: {feedback.page_content}" for feedback in past_feedbacks]
         )
     system_prompt = build_system_prompt(
-        state["user_id"], tool_dict.keys(), extra_instructions
+        state["user_id"], state["collection_name"], tool_dict.keys(), extra_instructions
     )
     messages.append(SystemMessage(content=system_prompt))
 
