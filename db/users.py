@@ -56,6 +56,7 @@ class UserChat(BaseModel):
     retrieved_documents: Optional[str]
     llm_response: str
     collection_name: Optional[str] = None
+    is_feedback_submitted: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
