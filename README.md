@@ -1,206 +1,128 @@
 # NeuroDesk Backend
 
-A FastAPI backend for processing PDF documents with LangChain and OpenAI embeddings, with user-specific document storage and retrieval.
+FastAPI backend for authenticated PDF chat with RAG. Users upload PDFs, which are embedded with OpenAI embeddings and stored in Chroma Cloud per-user collections. Queries are answered via an agent that retrieves relevant chunks and uses OpenAI or Google Gemini to respond. MongoDB stores users, chat history, password reset tokens, and email logs. Optional SMTP sends password reset emails.
+
+## Architecture
+
+- **API**: FastAPI (`main.py`)
+- **Auth**: JWT bearer tokens (`auth.py`) with bcrypt hashing
+- **Vector DB**: Chroma Cloud (per-user collections)
+- **Embeddings**: `text-embedding-3-small`
+- **LLM**: OpenAI GPT-4o or Google Gemini (auto-selected via env)
+- **RAG Agent**: LangGraph agent orchestrating retrieval + response (`agent.py`, tools in `utils.py`)
+- **DB**: MongoDB (users, chats, password reset, email logs)
+- **Email**: SMTP (e.g., Gmail App Password) for password reset (`emailer.py`)
+- **Logging**: `app.log` file + console
+
+## Requirements
+
+- Python 3.11.x
+- MongoDB instance
+- Chroma Cloud account + API key
+- OpenAI or Google API key (at least one)
+
+## Environment Variables (.env)
+
+Minimum to run:
+```
+DB_URI=mongodb://localhost:27017
+DB_NAME=neurodesk
+
+# Auth
+JWT_SECRET=change-me
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRES_HOURS=24
+
+# Chroma Cloud
+CHROMA_API_KEY=your_chroma_api_key
+CHROMA_TENANT=your_tenant
+CHROMA_DATABASE=your_database
+
+# LLMs (provide at least one)
+OPENAI_API_KEY=sk-...
+# or
+GOOGLE_API_KEY=...
+
+# SMTP (optional for password reset)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your@gmail.com
+SMTP_PASSWORD=your_app_password
+SMTP_FROM=your@gmail.com
+```
 
 ## Setup
 
-1. **Python version:**
-   - This project targets Python 3.11.8. Please ensure you have Python 3.11.8 installed.
-   - You can verify with:
-     ```bash
-     python --version
-     ```
-
-2. **Create and activate a virtual environment:**
-   - Windows (PowerShell):
-     ```powershell
-     python -m venv venv
-     .\venv\Scripts\Activate.ps1
-     ```
-   - Windows (Command Prompt):
-     ```bat
-     python -m venv venv
-     .\venv\Scripts\activate.bat
-     ```
-   - macOS/Linux (bash/zsh):
-     ```bash
-     python3 -m venv venv
-     source venv/bin/activate
-     ```
-
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Environment Configuration:**
-   Create a `.env` file in the root directory with your OpenAI API key:
-   ```
-   OPENAI_API_KEY=your_openai_api_key_here
-   ```
-
-5. **Run the application:**
-   ```bash
-   uvicorn main:app --reload
-   ```
-
-## API Endpoints
-
-### 1. Upload Document
-- **POST** `/document/upload`
-- **Description:** Upload a PDF document for processing
-- **Parameters:** 
-  - `file`: PDF file (multipart/form-data)
-  - `user_id`: User identifier (form data)
-- **Response:**
-  ```json
-  {
-    "message": "Document uploaded and processed successfully",
-    "filename": "document.pdf",
-    "user_id": "user123",
-    "collection_name": "user_user123_doc_document",
-    "pages_loaded": 5,
-    "chunks_created": 15
-  }
-  ```
-
-### 2. Search Documents
-- **GET** `/documents/search`
-- **Description:** Search documents using semantic similarity for a specific user
-- **Parameters:**
-  - `query`: Search query string
-  - `user_id`: User identifier
-  - `collection_name`: (Optional) Specific collection name to search
-  - `n_results`: Number of results to return (default: 5)
-- **Response:**
-  ```json
-  {
-    "query": "your search query",
-    "user_id": "user123",
-    "collection_name": "user_user123_doc_document",
-    "results": [
-      {
-        "document": "document content...",
-        "metadata": {...},
-        "rank": 1,
-        "collection_name": "user_user123_doc_document"
-      }
-    ]
-  }
-  ```
-
-### 3. List Collections
-- **GET** `/documents/collections`
-- **Description:** List all available document collections for a specific user
-- **Parameters:**
-  - `user_id`: User identifier
-- **Response:**
-  ```json
-  {
-    "user_id": "user123",
-    "collections": [
-      {
-        "name": "user_user123_doc_document1",
-        "document_name": "document1",
-        "count": 15
-      }
-    ]
-  }
-  ```
-
-### 4. Delete Collection
-- **DELETE** `/documents/collection/{collection_name}`
-- **Description:** Delete a specific collection for a user
-- **Parameters:**
-  - `collection_name`: Name of the collection to delete
-  - `user_id`: User identifier
-- **Response:**
-  ```json
-  {
-    "message": "Collection deleted successfully",
-    "collection_name": "user_user123_doc_document",
-    "user_id": "user123"
-  }
-  ```
-
-## Features
-
-- **User-Specific Storage:** Each user's documents are stored in separate collections
-- **PDF Processing:** Uses LangChain's PyPDFLoader for robust PDF text extraction
-- **Text Chunking:** RecursiveCharacterTextSplitter with 1000 character chunks and 200 character overlap
-- **OpenAI Embeddings:** Uses text-embedding-3-small model for high-quality embeddings
-- **ChromaDB Storage:** Persistent vector database with user-specific collections
-- **Semantic Search:** Advanced similarity search with metadata preservation
-- **Security:** Users can only access their own documents
-- **Cross-Collection Search:** Search across all user's documents or specific collections
-
-## User Management
-
-### Collection Naming Convention
-Collections are named using the pattern: `user_{user_id}_doc_{filename}`
-- Example: `user_user123_doc_annual_report_2024`
-
-### Security Features
-- Users can only access collections that start with their user_id
-- All endpoints require user_id validation
-- Automatic access control prevents cross-user data access
-
-## File Structure
-
+1) Create and activate venv
 ```
-backend/
-├── main.py              # FastAPI application
-├── requirements.txt     # Python dependencies
-├── README.md           # This file
-├── .env                # Environment variables (create this)
-└── chroma_db/         # ChromaDB storage (auto-created)
+python -m venv venv
+./venv/Scripts/activate  # Windows PowerShell: .\venv\Scripts\Activate.ps1
 ```
 
-## Usage Example
+2) Install deps
+```
+pip install -r requirements.txt
+```
 
-1. Start the server:
-   ```bash
-   uvicorn main:app --reload
-   ```
+3) Run server
+```
+uvicorn main:app --reload --port 8000
+```
 
-2. Upload a PDF document for a user:
-   ```bash
-   curl -X POST "http://localhost:8000/document/upload" \
-        -F "file=@document.pdf" \
-        -F "user_id=user123"
-   ```
+API docs available at `http://localhost:8000/docs`.
 
-3. Search the user's documents:
-   ```bash
-   # Search across all user's documents
-   curl "http://localhost:8000/documents/search?query=your question&user_id=user123"
-   
-   # Search in specific collection
-   curl "http://localhost:8000/documents/search?query=your question&user_id=user123&collection_name=user_user123_doc_document"
-   ```
+## API Summary
 
-4. List user's collections:
-   ```bash
-   curl "http://localhost:8000/documents/collections?user_id=user123"
-   ```
+All routes except signup/login require `Authorization: Bearer <token>`.
 
-5. Delete a collection:
-   ```bash
-   curl -X DELETE "http://localhost:8000/documents/collection/user_user123_doc_document?user_id=user123"
-   ```
+Auth
+- POST `/auth/signup` → create user; body: `{ name, email, password }`
+- POST `/auth/login` → returns `{ access_token, token_type, user }`
+- GET `/auth/me` → current user info
+- POST `/auth/password-reset/request` → starts reset flow (always 200)
+- POST `/auth/password-reset/confirm` → `{ token, new_password }`
 
-## API Documentation
+Documents
+- POST `/documents/upload` → multipart `file` (PDF). Creates user collection and stores embeddings.
+- GET `/documents/search?query=...&collection_name=...` → search within specific collection; omit `collection_name` to search across user collections.
+- GET `/documents/collections?page=1&limit=20` → list user collections.
+- DELETE `/documents/collections/{collection_name}` → delete a collection (must belong to user).
 
-Once the server is running, visit `http://localhost:8000/docs` for interactive API documentation. 
+Chat / RAG
+- GET `/ai/ask?query=...&collection_name=...` → answer a question (returns string)
+- GET `/documents/{collection_name}/messages?limit=20&cursor=ISO_DATE` → paginated chat history (newest first)
+- POST `/ai/ask/feedback` → `{ chat_id?, query?, is_positive_feedback?, comments? }` to log feedback and mark chat
 
-## Phase 2 Roadmap
-| Stage                   | Goal                                       |
-| ----------------------- | ------------------------------------------ |
-| 1. Logging              | Track queries, answers, and feedback       |
-| 2. Feedback UI          | Collect useful data for training           |
-| 3. Context Improvement  | Refine retrieval based on feedback         |
-| 4. Response Learning    | Train on user-corrected answers            |
-| 5. Memory Systems       | Personalize per-user context               |
-| 6. Clarifying Questions | Improve user experience on edge cases      |
-| 7. Fine-Tuning          | Enhance RAG pipeline with learned patterns |
-| 8. Evaluation           | Continuously measure and evolve            |
+## Data & Collections
+
+- `users`: `{ id, name, email, hashed_password, is_active, created_at, updated_at }`
+- `user_chat`: chat history per user `{ query, llm_response, collection_name, is_feedback_submitted, created_at }`
+- `password_reset_tokens`: `{ user_id, email, token, expires_at, used }`
+- `email_logs`: sent/failed emails
+- `doc_summary`: LLM-generated short summary of each uploaded PDF
+
+Vector collections are named: `user_{userId}_doc_{safeFilename}`.
+
+## RAG Flow
+
+1) PDF upload → chunk → embed → store in Chroma collection
+2) Question → agent selects tool(s) → retrieve chunks (collection-specific or cross-collection)
+3) LLM composes answer; chat saved in Mongo; optional feedback stored in a dedicated Chroma collection `feedback`
+
+## Security Notes
+
+- JWT-based auth; bcrypt for passwords
+- Collection access is restricted by prefix `user_{userId}_` and enforced server-side
+- CORS allows localhost dev origins (adjust in `main.py`)
+
+## Troubleshooting
+
+- Missing embeddings/Chroma keys → `/ai/ask` returns an error message; set `OPENAI_API_KEY` or `GOOGLE_API_KEY` and Chroma keys
+- Ensure Mongo is reachable via `DB_URI`
+- PDF uploads limited to 10MB and `.pdf` only
+
+## Scripts
+
+```
+uvicorn main:app --reload --port 8000
+```
